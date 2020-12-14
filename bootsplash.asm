@@ -37,9 +37,9 @@ start:
 
 	; expects string ptr in ax
 printstr:
-	mov bx, ax
-.loop:	mov al, [bx]
-	inc bx
+	mov si, ax
+.loop:	mov al, [si]
+	inc si
 	test al, al
 	jz .done
 	mov ah, 0eh
@@ -49,7 +49,7 @@ printstr:
 .done:	ret
 
 str_load_fail db "Failed to load second stage!",0
-str_foo db "Loaded 2nd stage boot loader",0
+str_booting db "Booting ...",0
 
 
 	times 510-($-$$) db 0
@@ -57,6 +57,19 @@ str_foo db "Loaded 2nd stage boot loader",0
 
 	; start of the second stage
 stage2_start:
+	call splash
+
+	xor ax, ax
+	mov es, ax
+
+	mov ax, str_booting
+	call printstr
+
+	cli
+.hang:	hlt
+	jmp .hang
+
+splash:
 	mov ax, 13h
 	int 10h
 
@@ -71,16 +84,6 @@ stage2_start:
 
 	mov ax, 3
 	int 10h
-
-	xor ax, ax
-	mov es, ax
-
-	mov ax, str_foo
-	call printstr
-
-.hang:	cli
-	hlt
-	jmp .hang
 
 waitkey:
 	in al, 64h
