@@ -5,6 +5,9 @@ stacktop equ 7b00h
 boot_driveno equ 7b00h	; 1 byte
 stage2_size equ stage2_end - stage2_start
 
+spawn_rate equ 5
+framebuf equ 40000h
+
 start:
 	xor ax, ax
 	mov ds, ax
@@ -75,21 +78,102 @@ splash:
 	mov ax, 13h
 	int 10h
 
-	mov ax, 0a000h
+	; setup ramdac colormap
+	mov ax, pal
+	shr ax, 4
+	mov ds, ax
+	xor ax, ax
+	mov dx, 3c8h
+	out dx, al
+	inc dx
+	xor bx, bx
+.cmap_loop:
+	mov al, [bx]
+	shr al, 2
+	out dx, al
+	inc bx
+	cmp bx, 768	; 256 * 3
+	jnz .cmap_loop
+
+	; decompress image
+	mov ax, img
+	shr ax, 4
 	mov es, ax
 	xor di, di
-
-	mov ax, pic
+	mov ax, imgrle
 	shr ax, 4
 	mov ds, ax
 	xor si, si
-
 	mov cx, 64000
 	call decode_rle
 
-	call waitkey
+	; precalculate spawn points
+	mov ax, es
+	mov ds, ax	; decompressed image -> ds:bx
+	xor bx, bx
+	mov ax, spawn_pos
+	shr ax, 4
+	mov es, ax	; spawn_pos table segment -> es:dx
+	xor edx, edx
 
-	mov ax, 3
+	mov cx, 64000
+.calcspawn_loop:
+	mov al, [bx]
+	test al, 0x80
+	jz .notspawn
+	mov [es:edx * 2], bx
+	inc edx
+.notspawn:
+	inc bx
+	dec cx
+	jnz .calcspawn_loop
+	; update num_spawn_pos
+	xor ax, ax
+	mov ds, ax
+	mov [num_spawn_pos], edx
+
+	mov ax, framebuf >> 4
+	mov fs, ax		; fs will point to the off-screen framebuffer
+
+	; effect main loop
+.mainloop:
+	mov cx, spawn_rate	; spawn 10 points per frame
+.spawn:	call rand
+	xor edx, edx
+	div dword [num_spawn_pos]	; edx <- rand % num_spawn_pos
+	mov bx, [es:edx * 2]		; grab one of the spawn positions
+	mov byte [fs:bx], 1		; plot a pixel there
+	dec cx
+	jnz .spawn
+
+	; wait until the start of vblank
+.waitvblank:
+	mov dx, 3dah
+	in al, dx
+	and al, 8
+	jz .waitvblank
+
+	; copy to screen
+	push es
+	mov ax, 0a000h
+	mov es, ax
+	xor di, di
+	mov ax, fs
+	mov ds, ax
+	xor si, si
+	mov ecx, 16000
+	rep movsd
+	pop es
+	xor ax, ax
+	mov ds, ax
+
+	; check for keypress
+	in al, 64h
+	and al, 1
+	jz .mainloop
+	in al, 60h
+
+.end:	mov ax, 3
 	int 10h
 	ret
 
@@ -125,9 +209,27 @@ waitkey:
 	in al, 60h
 	ret
 
+rand:
+	mov eax, [randval]
+	mul dword [randmul]
+	add eax, 12345
+	and eax, 0x7fffffff
+	mov [randval], eax
+	shr eax, 16
+	ret
+
+randmul dd 1103515245
+randval dd 0ace1h
+
+
 	; data
+num_spawn_pos dd 0
 	align 16
-pic:	incbin "nuclear.rle"
+spawn_pos:
+imgrle:	incbin "nuclear.rle"
+	align 16
+img:
+pal:	incbin "fire.pal"
 
 stage2_end:
 
