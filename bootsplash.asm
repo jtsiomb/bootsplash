@@ -61,6 +61,7 @@ stage2_start:
 
 	xor ax, ax
 	mov es, ax
+	mov ds, ax
 
 	mov ax, str_booting
 	call printstr
@@ -69,6 +70,7 @@ stage2_start:
 .hang:	hlt
 	jmp .hang
 
+	; splash screen effect
 splash:
 	mov ax, 13h
 	int 10h
@@ -76,14 +78,45 @@ splash:
 	mov ax, 0a000h
 	mov es, ax
 	xor di, di
-	mov cx, 32000
-	mov ax, 0505h
-	rep stosw
+
+	mov ax, pic
+	shr ax, 4
+	mov ds, ax
+	xor si, si
+
+	mov cx, 64000
+	call decode_rle
 
 	call waitkey
 
 	mov ax, 3
 	int 10h
+	ret
+
+	; decode RLE from ds:si to es:di, cx: number of decoded bytes (0 means 65536)
+	; - high bit set for the repetition count, followed by a value byte to
+	;   be repeated N times
+	; - high bit not set for raw data that should be copied directly
+decode_rle:
+	mov al, [si]
+	inc si
+	mov bl, 1	; default to "copy once" for raw values
+	test al, 0x80	; test the high bit to see if it's a count or a raw value
+	jz .copy
+	; it's a count, clear the high bit, and read the next byte for the value
+	and al, 0x7f
+	mov bl, al
+	mov al, [si]
+	inc si
+.copy:	mov [es:di], al
+	inc di
+	dec cx		; decrement decoded bytes counter
+	jz .end		; as soon as it reaches 0, bail
+	dec bl
+	jnz .copy
+	jmp decode_rle
+.end:	ret
+	
 
 waitkey:
 	in al, 64h
@@ -91,6 +124,10 @@ waitkey:
 	jz waitkey
 	in al, 60h
 	ret
+
+	; data
+	align 16
+pic:	incbin "nuclear.rle"
 
 stage2_end:
 
