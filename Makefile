@@ -11,6 +11,10 @@ $(bin): bootsplash.asm nuclear.rle
 nuclear.rle: nuclear.img
 	cat $< | rle/rle >$@ 2>rle.log
 
+.PHONY: clean
+clean:
+	rm -f $(bin)
+
 .PHONY: run
 run: $(img)
 	qemu-system-i386 -fda $<

@@ -137,14 +137,31 @@ splash:
 
 	; effect main loop
 .mainloop:
-	mov cx, spawn_rate	; spawn 10 points per frame
+	mov cx, spawn_rate
 .spawn:	call rand
 	xor edx, edx
 	div dword [num_spawn_pos]	; edx <- rand % num_spawn_pos
 	mov bx, [es:edx * 2]		; grab one of the spawn positions
-	mov byte [fs:bx], 1		; plot a pixel there
+	mov byte [fs:bx], 0xff		; plot a pixel there
 	dec cx
 	jnz .spawn
+
+	; blur the screen upwards
+	mov ax, fs
+	mov ds, ax	; let's use ds for this to avoid long instructions
+	xor bx, bx	; use: pointer
+	xor ax, ax	; use: pixel accum
+	xor dx, dx	; use: second pixel
+.blurloop:
+	mov al, [bx]
+	mov dl, [bx + 320]
+	add ax, dx
+	shr ax, 1
+	mov [bx], al
+	inc bx
+	cmp bx, 64000 - 320
+	jnz .blurloop
+
 
 	; wait until the start of vblank
 .waitvblank:
