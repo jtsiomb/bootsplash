@@ -5,7 +5,7 @@ stacktop equ 7b00h
 boot_driveno equ 7b00h	; 1 byte
 stage2_size equ stage2_end - stage2_start
 
-spawn_rate equ 5
+spawn_rate equ 256
 framebuf equ 40000h
 
 start:
@@ -159,7 +159,7 @@ splash:
 	shr ax, 1
 	mov [bx], al
 	inc bx
-	cmp bx, 64000 - 320
+	cmp bx, 64000 - 320 * 2
 	jnz .blurloop
 
 

@@ -8,8 +8,11 @@ $(img): $(bin)
 $(bin): bootsplash.asm nuclear.rle
 	nasm -f bin -o $@ $<
 
-nuclear.rle: nuclear.img
+nuclear.rle: nuclear.img rle/rle
 	cat $< | rle/rle >$@ 2>rle.log
+
+rle/rle:
+	$(MAKE) -C rle
 
 .PHONY: clean
 clean:
