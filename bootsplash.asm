@@ -1,12 +1,25 @@
 	org 7c00h
 	bits 16
 
+BOOT_DEV equ 80h
+
 stacktop equ 7b00h
 boot_driveno equ 7b00h	; 1 byte
 stage2_size equ stage2_end - stage2_start
 
-spawn_rate equ 256
+spawn_rate equ 512
 framebuf equ 40000h
+
+%macro floppy_motor_off 0
+	pushf
+	and dl, 80h
+	jnz %%end	; skip if high bit is set (i.e. it's not a floppy)
+	mov dx, 3f2h
+	in al, dx
+	and al, 0fh
+	out dx, al
+%%end:	popf
+%endmacro
 
 start:
 	xor ax, ax
@@ -23,12 +36,13 @@ start:
 	xor ax, ax
 	mov es, ax
 	mov bx, stage2_start
-	mov ah, 2		; read sectors LBA call
+	mov ah, 2		; read sectors call
 	mov al, (stage2_size + 511) / 512  ; num sectors
 	mov cx, 2		; ch: cylinder, cl: sector
 	xor dx, dx		; dh: head
 	mov dl, [boot_driveno]
 	int 13h
+	floppy_motor_off	; turn off floppy motor (if dl is < 80h)
 	jnc stage2_start	; loaded successfully, jump to it
 
 	; failed to load second sector
@@ -52,15 +66,19 @@ printstr:
 .done:	ret
 
 str_load_fail db "Failed to load second stage!",0
-str_booting db "Booting ...",0
+str_booting db "Booting system... ",0
+str_bootfail db "failed!",0
 
 
 	times 510-($-$$) db 0
-	dw 0xaa55
+bootsig dw 0xaa55
 
 	; start of the second stage
 stage2_start:
+	pushf
+	cli
 	call splash
+	popf
 
 	xor ax, ax
 	mov es, ax
@@ -69,9 +87,38 @@ stage2_start:
 	mov ax, str_booting
 	call printstr
 
-	cli
-.hang:	hlt
+	; blank out the existing boot signature to really see if a boot sector
+	; gets loaded correctly
+	xor ax, ax
+	mov [bootsig], ax
+
+	; load from BOOT_DEV into 7c00h and jump
+	mov bx, 7c00h
+	mov ax, 0201h		; ah: call 2 (read sectors), al: count = 1
+	mov cx, 1		; ch: cylinder 0, cl: sector 1
+	mov dx, BOOT_DEV	; dh: head 0, dl: boot device number
+	int 13h
+	floppy_motor_off	; turn floppy motor off (if dl < 80h)
+
+	jc .fail		; BIOS will set the carry flag on failure
+	mov ax, [bootsig]
+	cmp ax, 0aa55h
+	jnz .fail		; fail if what we loaded is not a valid boot sect
+
+	mov ax, 0e0dh
+	mov bx, 7
+	int 10h
+	mov ax, 0e0ah
+	int 10h
+
+	jmp 7c00h		; all checks passed, jump there
+
+.fail:	mov ax, str_bootfail
+	call printstr
+.hang:	cli
+	hlt
 	jmp .hang
+
 
 	; splash screen effect
 splash:
@@ -142,6 +189,15 @@ splash:
 	xor edx, edx
 	div dword [num_spawn_pos]	; edx <- rand % num_spawn_pos
 	mov bx, [es:edx * 2]		; grab one of the spawn positions
+
+	; animate the spawn position
+	xor ax, ax
+	mov al, [frameno]
+	mov bp, ax
+	movsx ax, byte [bp + sintab]
+	sar ax, 3
+	add bx, ax
+
 	mov byte [fs:bx], 0xff		; plot a pixel there
 	dec cx
 	jnz .spawn
@@ -153,13 +209,23 @@ splash:
 	xor ax, ax	; use: pixel accum
 	xor dx, dx	; use: second pixel
 .blurloop:
+	xor ax, ax
 	mov al, [bx]
 	mov dl, [bx + 320]
 	add ax, dx
-	shr ax, 1
+	mov dl, [bx + 319]
+	add ax, dx
+	mov dl, [bx + 321]
+	add ax, dx
+	mov dl, [bx + 640]
+	add ax, dx
+	xor dx, dx
+	mov cx, 5
+	div cx
 	mov [bx], al
+
 	inc bx
-	cmp bx, 64000 - 320 * 2
+	cmp bx, 64000 - 640
 	jnz .blurloop
 
 
@@ -183,6 +249,8 @@ splash:
 	pop es
 	xor ax, ax
 	mov ds, ax
+
+	inc word [frameno]
 
 	; check for keypress
 	in al, 64h
@@ -240,7 +308,10 @@ randval dd 0ace1h
 
 
 	; data
+%include "lut.inc"
+
 num_spawn_pos dd 0
+frameno dw 0
 	align 16
 spawn_pos:
 imgrle:	incbin "nuclear.rle"
