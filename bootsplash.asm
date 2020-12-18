@@ -1,3 +1,9 @@
+; bootsplash - bootable splash screen & chain-loader for IBM PC compatibles
+; -------------------------------------------------------------------------
+; Author: John Tsiombikas <nuclear@member.fsf.org>
+; This code is public domain. No rights reserved.
+; https://github.com/jtsiomb/bootsplash
+; -------------------------------------------------------------------------
 	org 7c00h
 	bits 16
 
@@ -20,6 +26,30 @@ framebuf equ 40000h
 	out dx, al
 %%end:	popf
 %endmacro
+
+bios_param_block:
+	jmp start	; 2 bytes
+	nop		; 1 byte
+	; start of BPB at offset 3
+	db "BSPL 0.1"	; 03h: OEM ident, 8 bytes
+	dw 512		; 0bh: bytes per sector
+	db 1		; 0dh: sectors per cluster
+	dw 1		; 0eh: reserved sectors (including boot record)
+	db 2		; 10h: number of FATs
+	dw 224		; 11h: number of dir entries
+	dw 2880		; 13h: number of sectors in volume
+	db 0fh		; 15h: media descriptor type (f = 3.5" HD floppy)
+	dw 9		; 16h: number of sectors per FAT
+	dw 18		; 18h: number of sectors per track
+	dw 2		; 1ah: number of heads
+	dd 0		; 1ch: number of hidden sectors
+	dd 0		; 20h: high bits of sector count
+	db 0		; 24h: drive number
+	db 0		; 25h: winnt flags
+	db 28h		; 26h: signature(?)
+	dd 0		; 27h: volume serial number
+	db "BOOT SPLASH"; 2bh: volume label, 11 bytes
+	db "FAT12   "	; 36h: filesystem id, 8 bytes
 
 start:
 	xor ax, ax
@@ -65,10 +95,22 @@ printstr:
 	jmp .loop
 .done:	ret
 
+print_hex_digit:
+	mov bl, al
+	and bx, 0fh
+	mov al, [bx + .hexdig_tab]
+	mov ah, 0eh
+	mov bx, 7
+	int 10h
+	ret
+
+.hexdig_tab:
+	db "0123456789abcdef"
+
 str_load_fail db "Failed to load second stage!",0
 str_booting db "Booting system... ",0
 str_bootfail db "failed!",0
-
+str_newline db 13,10,0
 
 	times 510-($-$$) db 0
 bootsig dw 0xaa55
