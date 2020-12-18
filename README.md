@@ -17,8 +17,6 @@ Future improvements (TODO list):
   - Option to load active partition instead of MBR from the selected boot device
     to make bootsplash itself installable on the MBR (as it is, it would just
     infinitely load itself).
-  - Add BIOS parameter block and fake partition table, to make it more likely
-    to be loadable from a USB stick.
   - Add timeout to boot automatically if no key is pressed for a certain amount
     of time.
 
@@ -40,4 +38,4 @@ release archives.
 If you don't want to customize the effect, simply copy the final files
 (`nuclear.rle` and `fire.pal`) and type make.
 
-To install onto a floppy, just use `dd`.
+To install onto a floppy or a USB stick, just use `dd`.
