@@ -78,8 +78,7 @@ start:
 	; failed to load second sector
 	mov ax, str_load_fail
 	call printstr
-.hang:	cli
-	hlt
+.hang:	hlt
 	jmp .hang
 
 	; expects string ptr in ax
@@ -157,8 +156,7 @@ stage2_start:
 
 .fail:	mov ax, str_bootfail
 	call printstr
-.hang:	cli
-	hlt
+.hang:	hlt
 	jmp .hang
 
 
