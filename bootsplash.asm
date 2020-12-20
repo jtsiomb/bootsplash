@@ -457,7 +457,7 @@ init_menu:
 	mov bp, sp
 	mov si, [bp]
 	mov di, [bp + 2]
-	add di, 4 * 320 + 4
+	add di, 3 * 320 + 4
 	add ax, %1
 	call draw_num
 	pop si

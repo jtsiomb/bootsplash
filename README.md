@@ -4,6 +4,8 @@ Small bootable program that shows a splash effect every time you boot it up, and
 when you hit any key on the keyboard, it proceeds to load the actual system (or
 your regular boot loader) off the hard drive.
 
+![shot](http://nuclear.mutantstargoat.com/sw/misc/bootsplashcrt-thumb.jpg)
+
 Video: https://www.youtube.com/watch?v=zcIpD00TYNg
 
 Author: John Tsiombikas <nuclear@member.fsf.org>
