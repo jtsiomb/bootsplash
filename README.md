@@ -2,7 +2,9 @@ Bootsplash
 ----------
 Small bootable program that shows a splash effect every time you boot it up, and
 when you hit any key on the keyboard, it proceeds to load the actual system (or
-your regular boot loader) off the hard drive.
+your regular boot loader) off the hard drive. It also presents a menu of all
+available drives in the system, and can chain-load the boot sector of any one
+of them, by pressing the corresponding number key.
 
 ![shot](http://nuclear.mutantstargoat.com/sw/misc/bootsplashcrt-thumb.jpg)
 
@@ -36,8 +38,10 @@ release archives.
     which is `incbin`-ed into the bootsplash program.
   - `fire.ppm`: 256x1 RGB image in binary Portable PixMap format. The header gets
     stripped and the resulting `fire.pal` file is `incbin`-ed into the program.
+  - `ui.png`: boot menu UI graphics. It gets dumped as `ui.img` with `pngdump`
+    and `incbin`-ed into the bootsplash program.
 
 If you don't want to customize the effect, simply copy the final files
-(`nuclear.rle` and `fire.pal`) and type make.
+(`nuclear.rle`, `fire.pal`, and `ui.img`) and type make.
 
 To install onto a floppy or a USB stick, just use `dd`.
