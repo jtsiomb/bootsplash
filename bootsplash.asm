@@ -11,6 +11,8 @@ BOOT_DEV equ 80h
 
 stacktop equ 7b00h
 boot_driveno equ 7b00h	; 1 byte
+num_floppies equ 7b02h	; 2 bytes
+num_hd equ 7b04h	; 2 bytes
 stage2_size equ stage2_end - stage2_start
 
 spawn_rate equ 512
@@ -52,6 +54,7 @@ bios_param_block:
 	db "FAT12   "	; 36h: filesystem id, 8 bytes
 
 start:
+	cld
 	xor ax, ax
 	mov ds, ax
 	mov es, ax
@@ -116,10 +119,18 @@ bootsig dw 0xaa55
 
 	; start of the second stage
 stage2_start:
+	mov ax, 13h
+	int 10h
+
+	call init_menu
+
 	pushf
 	cli
 	call splash
 	popf
+
+	mov ax, 3
+	int 10h
 
 	xor ax, ax
 	mov es, ax
@@ -162,9 +173,6 @@ stage2_start:
 
 	; splash screen effect
 splash:
-	mov ax, 13h
-	int 10h
-
 	; setup ramdac colormap
 	mov ax, pal
 	shr ax, 4
@@ -284,7 +292,7 @@ splash:
 	mov ax, fs
 	mov ds, ax
 	xor si, si
-	mov ecx, 16000
+	mov ecx, (64000 - 320 * 12) / 4
 	rep movsd
 	pop es
 	xor ax, ax
@@ -298,9 +306,7 @@ splash:
 	jz .mainloop
 	in al, 60h
 
-.end:	mov ax, 3
-	int 10h
-	ret
+.end:	ret
 
 	; decode RLE from ds:si to es:di, cx: number of decoded bytes (0 means 65536)
 	; - high bit set for the repetition count, followed by a value byte to
@@ -347,9 +353,88 @@ randmul dd 1103515245
 randval dd 0ace1h
 
 
+init_menu:
+	xor ax, ax
+	mov es, ax
+	xor di, di
+	; get number of floppies
+	mov ah, 8	; get drive params
+	mov dl, 0	; floppy
+	int 13h
+	xor dh, dh
+	mov [num_floppies], dx
+	mov ah, 8
+	mov dl, 80h
+	int 13h
+	xor dh, dh
+	mov [num_hd], dx
+
+	; clear the UI part of the framebuffer
+	mov ax, 0a000h
+	mov es, ax
+	mov di, 64000 - 320 * 12
+	mov ecx, 320 * 12 / 4
+	xor eax, eax
+	rep stosd
+	mov es, ax	; zero es again
+	; print the number of drives there
+	mov di, 64000 - 3200
+	mov ax, [num_floppies]
+	call draw_num
+	ret
+
+draw_num:
+	mov bp, sp
+	mov cx, 10
+.div:	xor dx, dx
+	div cx
+	push dx
+	and ax, ax
+	jnz .div
+.draw:	cmp sp, bp
+	jz .done
+	pop ax
+	shl ax, 3
+	add ax, font0
+	mov si, ax
+	call blit1bpp	; blit from ds:si -> a000h:di converting 1bpp -> 8bpp
+	add di, 8
+	jmp .draw
+.done:	ret
+
+blit1bpp:
+	push es
+	push di
+	mov ax, 0a000h
+	mov es, ax
+
+	mov dx, 8
+.row:	mov cx, 8
+	xor ax, ax
+	lodsb
+	mov ah, al
+.col:	rol ah, 1
+	mov al, 0ffh
+	test ah, 1
+	jnz .skip0
+	xor al, al
+.skip0:	stosb
+	dec cx
+	jnz .col
+	add di, 320 - 8
+	dec dx
+	jnz .row
+
+	pop di
+	pop es
+	ret
+
+
 	; data
+%include "numfont.inc"
 %include "lut.inc"
 
+load_driveno db 80h
 num_spawn_pos dd 0
 frameno dw 0
 	align 16
