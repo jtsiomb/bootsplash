@@ -3,9 +3,14 @@
 *.bin
 *.img
 *.pgm
+*.ppm
+*.png
+*.xcf
 *.log
 *.rle
+*.pal
 dis
 rle/rle
 rle/unrle
 lutgen/lutgen
+pngdump/pngdump

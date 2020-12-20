@@ -5,7 +5,7 @@ $(img): $(bin)
 	dd if=/dev/zero of=$@ bs=512 count=2880
 	dd if=$< of=$@ bs=512 conv=notrunc
 
-$(bin): bootsplash.asm nuclear.rle fire.pal
+$(bin): bootsplash.asm nuclear.rle fire.pal ui.img
 	nasm -f bin -o $@ $<
 
 nuclear.rle: nuclear.img rle/rle
@@ -17,8 +17,14 @@ nuclear.img: nuclear.pgm
 fire.pal: fire.ppm
 	dd if=$< of=$@ bs=1 skip=59
 
+ui.img: ui.png pngdump/pngdump
+	pngdump/pngdump $< >$@
+
 rle/rle:
 	$(MAKE) -C rle
+
+pngdump/pngdump:
+	$(MAKE) -C pngdump
 
 .PHONY: clean
 clean:

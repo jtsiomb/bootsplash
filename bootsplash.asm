@@ -10,13 +10,17 @@
 BOOT_DEV equ 80h
 
 stacktop equ 7b00h
-boot_driveno equ 7b00h	; 1 byte
-num_floppies equ 7b02h	; 2 bytes
-num_hd equ 7b04h	; 2 bytes
+boot_driveno equ 7b00h		; 1 byte
+load_driveno equ 7b01h		; 1 byte
+num_floppies equ 7b02h		; 2 bytes
+num_hd equ 7b04h		; 2 bytes
+num_read_tries equ 7b06h	; 2 bytes
 stage2_size equ stage2_end - stage2_start
 
 spawn_rate equ 512
 framebuf equ 40000h
+
+SC_1 equ 2	; scancode of key '1'
 
 %macro floppy_motor_off 0
 	pushf
@@ -97,6 +101,23 @@ printstr:
 	jmp .loop
 .done:	ret
 
+print_hex_word:
+	mov cx, 4	; 4 digits to print
+	jmp print_n_hex_digits
+
+print_hex_byte:
+	mov cx, 2	; 2 digits to print
+	mov ah, al	; move them in place
+
+print_n_hex_digits:
+	rol ax, 4
+	mov dx, ax	; save ax, print_hex_digit destroys it
+	call print_hex_digit
+	mov ax, dx
+	dec cx
+	jnz print_n_hex_digits
+	ret
+
 print_hex_digit:
 	mov bl, al
 	and bx, 0fh
@@ -110,7 +131,8 @@ print_hex_digit:
 	db "0123456789abcdef"
 
 str_load_fail db "Failed to load second stage!",0
-str_booting db "Booting system... ",0
+str_booting1 db "Booting system from drive ",0
+str_booting2 db " ... ",0
 str_bootfail db "failed!",0
 str_newline db 13,10,0
 
@@ -128,6 +150,9 @@ stage2_start:
 	cli
 	call splash
 	popf
+	; save the scancode returned by splash
+	xor ah, ah
+	push ax
 
 	mov ax, 3
 	int 10h
@@ -136,19 +161,48 @@ stage2_start:
 	mov es, ax
 	mov ds, ax
 
-	mov ax, str_booting
+	; initialize load_driveno to 80h (first hard disk)
+	mov byte [load_driveno], 80h
+	; check to see if the user pressed a key corresponding to a boot device
+	; and set [load_driveno] accordingly (scancode was pushed as word)
+	pop ax
+	sub ax, SC_1
+	js .end_devsel
+	cmp ax, [num_floppies]
+	jae .notfloppy
+	mov [load_driveno], ax
+	jmp .end_devsel
+.notfloppy:
+	sub ax, [num_floppies]
+	cmp ax, [num_hd]
+	jae .end_devsel
+	or ax, 80h	; hard disk numbers have high bit set
+	mov [load_driveno], ax
+.end_devsel:
+
+	mov ax, str_booting1
+	call printstr
+	mov ax, [load_driveno]
+	call print_hex_byte
+	mov ax, str_booting2
 	call printstr
 
 	; blank out the existing boot signature to really see if a boot sector
 	; gets loaded correctly
-	xor ax, ax
-	mov [bootsig], ax
+	mov word [bootsig], 0
+	mov word [num_read_tries], 3	; initialize number of retries to 3
 
-	; load from BOOT_DEV into 7c00h and jump
+	jmp .skip_rst	; don't reset the first time around
+.retry_rst:
+	xor ax, ax
+	mov dx, [load_driveno]
+	int 13h
+.skip_rst:
+	; load from [load_driveno] into 7c00h and jump
 	mov bx, 7c00h
 	mov ax, 0201h		; ah: call 2 (read sectors), al: count = 1
 	mov cx, 1		; ch: cylinder 0, cl: sector 1
-	mov dx, BOOT_DEV	; dh: head 0, dl: boot device number
+	mov dx, [load_driveno]	; dh: head 0, dl: boot device number
 	int 13h
 	floppy_motor_off	; turn floppy motor off (if dl < 80h)
 
@@ -165,7 +219,9 @@ stage2_start:
 
 	jmp 7c00h		; all checks passed, jump there
 
-.fail:	mov ax, str_bootfail
+.fail:	dec word [num_read_tries]
+	jnz .retry_rst
+	mov ax, str_bootfail
 	call printstr
 .hang:	hlt
 	jmp .hang
@@ -246,7 +302,7 @@ splash:
 	sar ax, 3
 	add bx, ax
 
-	mov byte [fs:bx], 0xff		; plot a pixel there
+	mov byte [fs:bx], 0f7h	; plot a pixel there (top 8 colors rsvd. for UI)
 	dec cx
 	jnz .spawn
 
@@ -292,7 +348,7 @@ splash:
 	mov ax, fs
 	mov ds, ax
 	xor si, si
-	mov ecx, (64000 - 320 * 12) / 4
+	mov ecx, (64000 - 320 * 14) / 4
 	rep movsd
 	pop es
 	xor ax, ax
@@ -355,32 +411,85 @@ randval dd 0ace1h
 
 init_menu:
 	xor ax, ax
-	mov es, ax
-	xor di, di
+	mov [num_floppies], ax	; initialize both to 0
+	mov [num_hd], ax
+
+	mov es, ax	; ralf brown suggests pointing es:di to 0
+	xor di, di	; to "guard against BIOS bugs"
 	; get number of floppies
 	mov ah, 8	; get drive params
 	mov dl, 0	; floppy
 	int 13h
+	jc .no_floppies
 	xor dh, dh
 	mov [num_floppies], dx
+.no_floppies:
+	xor ax, ax
+	mov es, ax
+	xor di, di
+	; get number of hard disks
 	mov ah, 8
 	mov dl, 80h
 	int 13h
+	jc .no_hd
 	xor dh, dh
 	mov [num_hd], dx
+.no_hd:
 
 	; clear the UI part of the framebuffer
 	mov ax, 0a000h
 	mov es, ax
-	mov di, 64000 - 320 * 12
-	mov ecx, 320 * 12 / 4
+	mov di, 64000 - 320 * 14
+	mov ecx, 320 * 14 / 4
 	xor eax, eax
 	rep stosd
-	mov es, ax	; zero es again
-	; print the number of drives there
-	mov di, 64000 - 3200
-	mov ax, [num_floppies]
+
+%macro blit_ui_button 1
+	push ax
+	push di
+	push si
+	mov bx, 14	; y
+%%y:	mov ecx, 32/4	; x
+	rep movsd
+	add di, 320 - 32
+	dec bx
+	jnz %%y
+	mov bp, sp
+	mov si, [bp]
+	mov di, [bp + 2]
+	add di, 4 * 320 + 4
+	add ax, %1
 	call draw_num
+	pop si
+	pop di
+	pop ax
+%endmacro
+
+	; draw UI buttons
+	mov di, 64000 - 320 * 14
+	mov si, uigfx		; floppy icon
+	xor ax, ax
+.draw_floppies:
+	cmp ax, [num_floppies]
+	jz .done_floppies
+	inc ax
+	blit_ui_button 0
+	add di, 34		; leave a gap between buttons
+	jmp .draw_floppies
+.done_floppies:
+	mov si, uigfx + 32 * 14	; hard disk icon
+	xor ax, ax
+.draw_harddisks:
+	cmp ax, [num_hd]
+	jz .done_harddisks
+	inc ax
+	blit_ui_button [num_floppies]
+	add di, 34
+	jmp .draw_harddisks
+.done_harddisks:
+
+	xor ax, ax
+	mov es, ax	; zero es again
 	ret
 
 draw_num:
@@ -434,7 +543,8 @@ blit1bpp:
 %include "numfont.inc"
 %include "lut.inc"
 
-load_driveno db 80h
+uigfx:	incbin "ui.img"
+
 num_spawn_pos dd 0
 frameno dw 0
 	align 16

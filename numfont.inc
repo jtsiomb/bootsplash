@@ -1,7 +1,3 @@
-font:
-	dd font0, font1, font2, font3, font4
-	dd font5, font6, font7, font8, font9
-
 font0:
 	db 0x7c	; 01111100
 	db 0x82	; 10000010
