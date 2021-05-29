@@ -15,6 +15,13 @@ load_driveno equ 7b01h		; 1 byte
 num_floppies equ 7b02h		; 2 bytes
 num_hd equ 7b04h		; 2 bytes
 num_read_tries equ 7b06h	; 2 bytes
+sect_pending equ 7b08h		; 2 bytes
+sect_per_track equ 7b0ah	; 2 bytes
+cur_head equ 7b0ch		; 2 bytes - current head
+start_sect equ 7b0eh		; 2 bytes - start sector in track
+destptr equ 7b10h		; 2 bytes - destination pointer
+num_heads equ 7b12h		; 2 bytes - number of heads
+cur_cyl equ 7b14h		; 2 bytes - current cylinder
 stage2_size equ stage2_end - stage2_start
 
 spawn_rate equ 512
@@ -65,24 +72,112 @@ start:
 	mov ss, ax
 	mov gs, ax
 	mov fs, ax
-
+	jmp 00:.setcs
+.setcs:
 	mov sp, stacktop
 	mov [boot_driveno], dl
 
-	; load the rest of the code at 7e00
-	xor ax, ax
-	mov es, ax
-	mov bx, stage2_start
-	mov ah, 2		; read sectors call
-	mov al, (stage2_size + 511) / 512  ; num sectors
-	mov cx, 2		; ch: cylinder, cl: sector
-	xor dx, dx		; dh: head
+	; query sectors per track
+	mov ah, 8	; get drive parameters call, dl already has the drive
+	xor di, di
+	int 13h
+	jc .queryfail
+	and cx, 3fh
+	mov [sect_per_track], cx
+	shr dx, 8
+	inc dx
+	mov [num_heads], dx
+	jmp .querydone
+.queryfail:
+	; in case of failure, try 18 sectors per track, 2 heads
+	mov word [sect_per_track], 18
+	mov word [num_heads], 2
+.querydone:
+
+	; load the rest of the code at 7e00h
+	mov ax, stage2_start
+	shr ax, 4
+	mov es, ax	; destination segment 7e0h to allow loading up to 64k
+	mov word [destptr], 0
+	mov word [sect_pending], (stage2_size + 511) / 512 + 1
+	mov word [start_sect], 1	; start from sector 1 to skip boot sector
+	mov word [cur_cyl], 0
+	mov word [cur_head], 0
+
+.rdloop:
+	mov cx, [start_sect]
+	mov ax, [sect_pending]
+	sub ax, cx		; num_sect = pending - start_sect
+	cmp ax, [sect_per_track]
+	jbe .noadj
+	mov ax, [sect_per_track]	; read max sect_per_track at a time
+	sub ax, cx
+.noadj:	push ax		; save how many sectors we're reading
+
+	pusha
+	call print_hex_word
+	mov ax, str_rdtrack2
+	call printstr
+	mov ax, [cur_cyl]
+	call print_hex_byte
+	mov ax, str_rdtrack3
+	call printstr
+	mov ax, [cur_head]
+	call print_hex_byte
+	mov ax, str_rdtrack3
+	call printstr
+	mov ax, [start_sect]
+	call print_hex_byte
+	mov ax, str_newline
+	call printstr
+	popa
+
+	mov ch, [cur_cyl]
+	mov dh, [cur_head]
+	mov bx, [destptr]
+
+	inc cl			; sector numbers start from 1
+	mov ah, 2		; read sectors is call 2
 	mov dl, [boot_driveno]
 	int 13h
-	floppy_motor_off	; turn off floppy motor (if dl is < 80h)
-	jnc stage2_start	; loaded successfully, jump to it
+	jc .fail
+	; track read sucessfully
+	mov word [start_sect], 0	; all subsequent tracks are whole
+	mov ax, [cur_head]
+	inc ax
+	cmp ax, [num_heads]
+	jnz .skip_cyl_adv
+	xor ax, ax
+	inc byte [cur_cyl]
+.skip_cyl_adv:
+	mov [cur_head], ax
+
+	pop ax			; num_sect
+	mov cx, ax
+	shl cx, 9		; convert to bytes
+	add [destptr], cx
+	sub [sect_pending], ax
+	jnz .rdloop
+
+	; loaded sucessfully, reset es back to 0 and jump
+	xor ax, ax
+	mov es, ax
+	jmp stage2_start
+
+.fail:	add esp, 2	; clear num_sect off the stack
+	dec word [num_read_tries]
+	jz .abort
+
+	; reset controller and retry
+	xor ax, ax
+	mov dl, [boot_driveno]
+	int 13h
+	jmp .rdloop
 
 	; failed to load second sector
+.abort:	xor ax, ax
+	mov es, ax
+	floppy_motor_off	; turn off floppy motor (if dl is < 80h)
 	mov ax, str_load_fail
 	call printstr
 .hang:	hlt
@@ -130,7 +225,9 @@ print_hex_digit:
 .hexdig_tab:
 	db "0123456789abcdef"
 
-str_load_fail db "Failed to load second stage!",0
+str_rdtrack2 db " from ",0
+str_rdtrack3 db "/",0
+str_load_fail db "Failed to load 2nd stage!",0
 str_booting1 db "Booting system from drive ",0
 str_booting2 db " ... ",0
 str_bootfail db "failed!",0
@@ -141,6 +238,7 @@ bootsig dw 0xaa55
 
 	; start of the second stage
 stage2_start:
+	floppy_motor_off
 	mov ax, 13h
 	int 10h
 
@@ -336,9 +434,12 @@ splash:
 	; wait until the start of vblank
 .waitvblank:
 	mov dx, 3dah
-	in al, dx
+.invb:	in al, dx
 	and al, 8
-	jz .waitvblank
+	jnz .invb
+.offvb:	in al, dx
+	and al, 8
+	jz .offvb
 
 	; copy to screen
 	push es
